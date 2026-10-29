@@ -1,7 +1,8 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Web;
-
+using ClosedXML.Excel;
 namespace 期中報告
 {
     public partial class Form1 : Form
@@ -170,10 +171,11 @@ namespace 期中報告
             using var dialog = new SaveFileDialog
             {
                 Title = "匯出躍遷紀錄",
-                Filter = "CSV 檔案 (*.csv)|*.csv",
-                FileName = "躍遷紀錄.csv",
+                Filter = "Excel 活頁簿 (*.xlsx)|*.xlsx|CSV 檔案 (*.csv)|*.csv",
+                FilterIndex = 1,
+                FileName = "躍遷紀錄",
                 AddExtension = true,
-                DefaultExt = "csv"
+                DefaultExt = "xlsx"
             };
 
             if (dialog.ShowDialog() != DialogResult.OK)
@@ -181,28 +183,20 @@ namespace 期中報告
 
             try
             {
-                using var writer = new StreamWriter(
-                    dialog.FileName,
-                    false,
-                    new UTF8Encoding(true)); // 帶 BOM，方便 Excel 正確辨識中文
+                string extension = Path.GetExtension(dialog.FileName).ToLowerInvariant();
 
-                var columns = recordsGridView.Columns
-                    .Cast<DataGridViewColumn>()
-                    .Where(column => column.Visible)
-                    .ToList();
-
-                writer.WriteLine(string.Join(",", columns.Select(column =>
-                    EscapeCsv(column.HeaderText))));
-
-                foreach (DataGridViewRow row in recordsGridView.Rows)
+                if (extension == ".xlsx")
                 {
-                    if (row.IsNewRow)
-                        continue;
-
-                    var values = columns.Select(column =>
-                        EscapeCsv(Convert.ToString(row.Cells[column.Index].Value) ?? ""));
-
-                    writer.WriteLine(string.Join(",", values));
+                    ExportToExcel(dialog.FileName);
+                }
+                else if (extension == ".csv")
+                {
+                    ExportToCsv(dialog.FileName);
+                }
+                else
+                {
+                    MessageBox.Show("請選擇 .xlsx 或 .csv 格式。");
+                    return;
                 }
 
                 MessageBox.Show("匯出完成。");
@@ -211,7 +205,103 @@ namespace 期中報告
             {
                 MessageBox.Show($"匯出失敗：{ex.Message}");
             }
+        }
 
+        private void ExportToCsv(string filePath)
+        {
+            var columns = recordsGridView.Columns
+                .Cast<DataGridViewColumn>()
+                .Where(column => column.Visible)
+                .ToList();
+
+            using var writer = new StreamWriter(
+                filePath,
+                false,
+                new UTF8Encoding(true));
+
+            writer.WriteLine(string.Join(",", columns.Select(column =>
+                EscapeCsv(column.HeaderText))));
+
+            foreach (DataGridViewRow row in recordsGridView.Rows)
+            {
+                if (row.IsNewRow)
+                    continue;
+
+                var values = columns.Select(column =>
+                {
+                    string value = Convert.ToString(
+                        row.Cells[column.Index].Value) ?? "";
+
+                    return EscapeCsv(value);
+                });
+
+                writer.WriteLine(string.Join(",", values));
+            }
+        }
+
+        private void ExportToExcel(string filePath)
+        {
+            var columns = recordsGridView.Columns
+                .Cast<DataGridViewColumn>()
+                .Where(column => column.Visible)
+                .ToList();
+
+            using var workbook = new XLWorkbook();
+            var sheet = workbook.Worksheets.Add("躍遷紀錄");
+
+            // 標題列
+            for (int col = 0; col < columns.Count; col++)
+            {
+                sheet.Cell(1, col + 1).Value = columns[col].HeaderText;
+                sheet.Cell(1, col + 1).Style.Font.Bold = true;
+            }
+
+            // 資料列
+            int excelRow = 2;
+
+            foreach (DataGridViewRow row in recordsGridView.Rows)
+            {
+                if (row.IsNewRow)
+                    continue;
+
+                for (int col = 0; col < columns.Count; col++)
+                {
+                    string header = columns[col].HeaderText;
+                    string value = Convert.ToString(
+                        row.Cells[columns[col].Index].Value) ?? "";
+
+                    var cell = sheet.Cell(excelRow, col + 1);
+
+                    if (header.Equals("Id", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // 將長 ID 存為文字，避免 Excel 捨去數字末位
+                        cell.Value = value;
+                        cell.Style.NumberFormat.Format = "@";
+                    }
+                    else if (header.Equals("Time", StringComparison.OrdinalIgnoreCase) &&
+                             DateTime.TryParseExact(
+                                 value,
+                                 "yyyy-MM-dd HH:mm:ss",
+                                 CultureInfo.InvariantCulture,
+                                 DateTimeStyles.None,
+                                 out DateTime dateTime))
+                    {
+                        cell.Value = dateTime;
+                        cell.Style.DateFormat.Format = "yyyy-mm-dd hh:mm:ss";
+                    }
+                    else
+                    {
+                        cell.Value = value;
+                    }
+                }
+
+                excelRow++;
+            }
+
+            sheet.Columns().AdjustToContents();
+            sheet.SheetView.FreezeRows(1);
+
+            workbook.SaveAs(filePath);
         }
 
         private static string EscapeCsv(string value)
