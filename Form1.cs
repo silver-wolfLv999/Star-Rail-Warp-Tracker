@@ -3,6 +3,8 @@ using System.Text;
 using System.Text.Json;
 using System.Web;
 using ClosedXML.Excel;
+using System.Data;
+using System.Data.OleDb;
 namespace 期中報告
 {
     public partial class Form1 : Form
@@ -10,8 +12,9 @@ namespace 期中報告
         public Form1()
         {
             InitializeComponent();
+            EnsureDatabaseExists();
         }
-
+        
         private void Form1_Load(object sender, EventArgs e)
         {
             poolComboBox.Items.Clear();
@@ -21,7 +24,168 @@ namespace 期中報告
 
             poolComboBox.SelectedIndex = 0;
         }
+        private static string DatabasePath =>
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "StarRailWarpTracker",
+                "WarpHistory.accdb");
 
+        private static string ConnectionString =>
+            $"Provider=Microsoft.ACE.OLEDB.12.0;Data Source={DatabasePath};Persist Security Info=False;";
+
+        private static void EnsureDatabaseExists()
+        {
+            string folder = Path.GetDirectoryName(DatabasePath)!;
+            Directory.CreateDirectory(folder);
+
+            if (!File.Exists(DatabasePath))
+            {
+                string templatePath = Path.Combine(
+                    Application.StartupPath,
+                    "WarpHistory.accdb");
+
+                if (!File.Exists(templatePath))
+                {
+                    throw new FileNotFoundException(
+                        "找不到空白的 Access 資料庫範本。");
+                }
+
+                File.Copy(templatePath, DatabasePath);
+            }
+        }
+
+        private static string GetTableName(int gachaType)
+        {
+            return gachaType switch
+            {
+                11 => "WarpRecords",
+                12 => "LightConeWarpRecords",
+                1 => "StandardWarpRecords"
+            };
+        }
+        private static void SaveRecordsToAccess(List<WarpRecord> records,int gachaType)
+        {
+            string tableName = GetTableName(gachaType);
+            using var connection = new OleDbConnection(ConnectionString);
+            connection.Open();
+
+            using var transaction = connection.BeginTransaction();
+
+            try
+            {
+                foreach (var record in records)
+                {
+                    // 先查詢同卡池、同 ID 是否已存在
+                    using var checkCommand = new OleDbCommand(
+                        $"SELECT COUNT(*) FROM [{tableName}] WHERE GachaType = ? AND RecordId = ?",
+                        connection,
+                        transaction);   
+
+                    // OleDb 使用 ? 參數，參數必須依 SQL 中的順序加入
+                    checkCommand.Parameters.Add("?", OleDbType.Integer).Value = gachaType;
+                    checkCommand.Parameters.Add("?", OleDbType.VarWChar, 30).Value = record.Id;
+
+                    int exists = Convert.ToInt32(checkCommand.ExecuteScalar());
+
+                    if (exists > 0)
+                        continue;
+
+                    using var insertCommand = new OleDbCommand(
+                        $@"INSERT INTO [{tableName}]
+                           (GachaType, RecordId, ItemName, ItemType, Rarity, PullTime)
+                           VALUES (?, ?, ?, ?, ?, ?)",
+                        connection,
+                        transaction);
+
+                    insertCommand.Parameters.Add("?", OleDbType.Integer).Value = gachaType;
+                    insertCommand.Parameters.Add("?", OleDbType.VarWChar, 30).Value = record.Id;
+                    insertCommand.Parameters.Add("?", OleDbType.VarWChar, 100).Value = record.Name;
+                    insertCommand.Parameters.Add("?", OleDbType.VarWChar, 30).Value = record.Type;
+                    insertCommand.Parameters.Add("?", OleDbType.VarWChar, 5).Value = record.Rarity;
+
+                    if (DateTime.TryParse(
+                        record.Time,
+                        CultureInfo.InvariantCulture,
+                        DateTimeStyles.None,
+                        out DateTime pullTime))
+                    {
+                        insertCommand.Parameters.Add("?", OleDbType.Date).Value = pullTime;
+                    }
+                    else
+                    {
+                        insertCommand.Parameters.Add("?", OleDbType.Date).Value = DBNull.Value;
+                    }
+
+                    insertCommand.ExecuteNonQuery();
+                }
+
+                transaction.Commit();
+            }
+            catch
+            {
+                transaction.Rollback();
+                throw;
+            }
+        }
+
+        private static List<WarpRecord> LoadRecordsFromAccess(int gachaType)
+        {
+            string tableName = GetTableName(gachaType);
+            var records = new List<WarpRecord>();
+
+            using var connection = new OleDbConnection(ConnectionString);
+            connection.Open();
+
+            using var command = new OleDbCommand(
+                $@"SELECT RecordId, ItemName, ItemType, Rarity, PullTime
+                   FROM [{tableName}]
+                   WHERE GachaType = ?
+                   ORDER BY PullTime",
+                connection);
+
+            command.Parameters.Add("?", OleDbType.Integer).Value = gachaType;
+
+            using var reader = command.ExecuteReader();
+
+            while (reader != null && reader.Read())
+            {
+                records.Add(new WarpRecord(
+                    Name: reader["ItemName"]?.ToString() ?? "",
+                    Type: reader["ItemType"]?.ToString() ?? "",
+                    Rarity: reader["Rarity"]?.ToString() ?? "",
+                    Time: reader["PullTime"] == DBNull.Value
+                        ? ""
+                        : Convert.ToDateTime(reader["PullTime"])
+                            .ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+                    Id: reader["RecordId"]?.ToString() ?? ""));
+            }
+
+            return records;
+        }
+
+        private static HashSet<string> LoadRecordIdsFromAccess(int gachaType)
+        {
+            string tableName = GetTableName(gachaType);
+            var ids = new HashSet<string>();
+
+            using var connection = new OleDbConnection(ConnectionString);
+            connection.Open();
+
+            using var command = new OleDbCommand(
+                $"SELECT RecordId FROM [{tableName}] WHERE GachaType = ?",
+                connection);
+
+            command.Parameters.Add("?", OleDbType.Integer).Value = gachaType;
+
+            using var reader = command.ExecuteReader();
+
+            while (reader != null && reader.Read())
+            {
+                ids.Add(reader["RecordId"].ToString() ?? "");
+            }
+
+            return ids;
+        }
         private async void importButton_Click(object sender, EventArgs e)
         {
             if (poolComboBox.SelectedIndex < 0)
@@ -42,11 +206,23 @@ namespace 期中報告
 
             try
             {
-                var rows = await GetAllHistoryAsync(historyUrlTextBox.Text, gachaType);
+                var knownIds = LoadRecordIdsFromAccess(gachaType);
+                var fetchedRows = await GetAllHistoryAsync(historyUrlTextBox.Text, gachaType, knownIds);
+
+                SaveRecordsToAccess(fetchedRows, gachaType);
+
+                var rows = LoadRecordsFromAccess(gachaType);
 
                 recordsGridView.AutoGenerateColumns = true;
                 recordsGridView.DataSource = null;
                 recordsGridView.DataSource = rows;
+
+                if (recordsGridView.Columns[nameof(WarpRecord.Id)] != null)
+                {
+                    recordsGridView.Columns[nameof(WarpRecord.Id)].Visible = false;
+                }
+
+                ShowFiveStarPullCounts(rows);
 
                 MessageBox.Show($"讀取完成，共 {rows.Count} 筆。");
             }
@@ -65,7 +241,10 @@ namespace 期中報告
             Timeout = TimeSpan.FromSeconds(15)
         };
 
-        private static async Task<List<WarpRecord>> GetAllHistoryAsync(string pastedUrl, int gachaType)
+        private static async Task<List<WarpRecord>> GetAllHistoryAsync(
+    string pastedUrl,
+    int gachaType,
+    HashSet<string> knownIds)
         {
             if (!Uri.TryCreate(pastedUrl.Trim(), UriKind.Absolute, out var uri) ||
                 uri.Scheme != Uri.UriSchemeHttps ||
@@ -93,8 +272,8 @@ namespace 期中報告
             query["page"] = "1";
             query["end_id"] = "0";
 
-            var allRows = new List<WarpRecord>();
-            var seenIds = new HashSet<string>();
+            var newRows = new List<WarpRecord>();
+            var seenPageLastIds = new HashSet<string>();
 
             while (true)
             {
@@ -126,33 +305,45 @@ namespace 期中報告
                 if (list.GetArrayLength() == 0)
                     break;
 
-                var pageRows = new List<WarpRecord>();
+                bool foundKnownRecord = false;
+                string lastId = "";
 
                 foreach (var item in list.EnumerateArray())
                 {
-                    pageRows.Add(new WarpRecord(
+                    var record = new WarpRecord(
                         Name: ReadString(item, "name"),
                         Type: ReadString(item, "item_type"),
                         Rarity: ReadString(item, "rank_type"),
                         Time: ReadString(item, "time"),
-                        Id: ReadString(item, "id")));
+                        Id: ReadString(item, "id"));
+
+                    lastId = record.Id;
+
+                    // API 資料由新到舊；遇到資料庫已存的紀錄就停止
+                    if (!string.IsNullOrWhiteSpace(record.Id) &&
+                        knownIds.Contains(record.Id))
+                    {
+                        foundKnownRecord = true;
+                        break;
+                    }
+
+                    newRows.Add(record);
                 }
 
-                allRows.AddRange(pageRows);
-
-                // 防止伺服器重複回傳同一頁，造成無限迴圈
-                var lastId = pageRows[^1].Id;
-
-                if (string.IsNullOrWhiteSpace(lastId) || !seenIds.Add(lastId))
+                if (foundKnownRecord)
                     break;
 
-                query["end_id"] = lastId;
+                if (string.IsNullOrWhiteSpace(lastId) ||
+                    !seenPageLastIds.Add(lastId))
+                {
+                    break;
+                }
 
-                // 避免連續快速發出大量請求
+                query["end_id"] = lastId;
                 await Task.Delay(200);
             }
 
-            return allRows;
+            return newRows;
         }
 
         private static string ReadString(JsonElement item, string propertyName) =>
@@ -211,8 +402,13 @@ namespace 期中報告
         {
             var columns = recordsGridView.Columns
                 .Cast<DataGridViewColumn>()
-                .Where(column => column.Visible)
-                .ToList();
+                .Where(column =>
+                    column.Visible &&
+                    !string.Equals(
+                        column.DataPropertyName,
+                        nameof(WarpRecord.Id),
+                        StringComparison.OrdinalIgnoreCase))
+                                .ToList();
 
             using var writer = new StreamWriter(
                 filePath,
@@ -243,8 +439,13 @@ namespace 期中報告
         {
             var columns = recordsGridView.Columns
                 .Cast<DataGridViewColumn>()
-                .Where(column => column.Visible)
-                .ToList();
+                .Where(column =>
+                    column.Visible &&
+                    !string.Equals(
+                        column.DataPropertyName,
+                        nameof(WarpRecord.Id),
+                        StringComparison.OrdinalIgnoreCase))
+                                .ToList();
 
             using var workbook = new XLWorkbook();
             var sheet = workbook.Worksheets.Add("躍遷紀錄");
@@ -307,6 +508,27 @@ namespace 期中報告
         private static string EscapeCsv(string value)
         {
             return "\"" + value.Replace("\"", "\"\"") + "\"";
+        }
+
+        private void ShowFiveStarPullCounts(List<WarpRecord> rows)
+        {
+            int pullsSinceLastFiveStar = 0;
+            var results = new List<string>();
+
+            foreach (var record in rows.OrderBy(r => r.Time))
+            {
+                pullsSinceLastFiveStar++;
+
+                if (record.Rarity == "5")
+                {
+                    results.Add($"{record.Name}: {pullsSinceLastFiveStar} 抽");
+                    pullsSinceLastFiveStar = 0;
+                }
+            }
+
+            fiveStarStatsLabel.Text = results.Count > 0
+                ? string.Join(Environment.NewLine, results)
+                : "目前沒有五星紀錄。";
         }
 
         public sealed record WarpRecord(

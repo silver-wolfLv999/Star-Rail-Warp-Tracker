@@ -33,6 +33,7 @@
             recordsGridView = new DataGridView();
             poolComboBox = new ComboBox();
             exportButton = new Button();
+            fiveStarStatsLabel = new Label();
             ((System.ComponentModel.ISupportInitialize)recordsGridView).BeginInit();
             SuspendLayout();
             // 
@@ -59,7 +60,7 @@
             recordsGridView.Location = new Point(12, 96);
             recordsGridView.Name = "recordsGridView";
             recordsGridView.RowHeadersWidth = 51;
-            recordsGridView.Size = new Size(776, 342);
+            recordsGridView.Size = new Size(610, 473);
             recordsGridView.TabIndex = 2;
             // 
             // poolComboBox
@@ -77,15 +78,24 @@
             exportButton.Name = "exportButton";
             exportButton.Size = new Size(94, 29);
             exportButton.TabIndex = 4;
-            exportButton.Text = "匯出 CSV";
+            exportButton.Text = "匯出檔案";
             exportButton.UseVisualStyleBackColor = true;
             exportButton.Click += exportButton_Click;
+            // 
+            // fiveStarStatsLabel
+            // 
+            fiveStarStatsLabel.AutoEllipsis = true;
+            fiveStarStatsLabel.Location = new Point(643, 96);
+            fiveStarStatsLabel.Name = "fiveStarStatsLabel";
+            fiveStarStatsLabel.Size = new Size(384, 462);
+            fiveStarStatsLabel.TabIndex = 5;
             // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(9F, 19F);
             AutoScaleMode = AutoScaleMode.Font;
-            ClientSize = new Size(800, 450);
+            ClientSize = new Size(1039, 581);
+            Controls.Add(fiveStarStatsLabel);
             Controls.Add(exportButton);
             Controls.Add(poolComboBox);
             Controls.Add(recordsGridView);
@@ -106,5 +116,6 @@
         private DataGridView recordsGridView;
         private ComboBox poolComboBox;
         private Button exportButton;
+        private Label fiveStarStatsLabel;
     }
 }
