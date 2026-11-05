@@ -1,8 +1,6 @@
 using System.Globalization;
-using System.Text;
 using System.Text.Json;
 using System.Web;
-using ClosedXML.Excel;
 using System.Data;
 using System.Data.OleDb;
 namespace 期中報告
