@@ -32,7 +32,6 @@
             historyUrlTextBox = new TextBox();
             recordsGridView = new DataGridView();
             poolComboBox = new ComboBox();
-            exportButton = new Button();
             fiveStarStatsLabel = new Label();
             ((System.ComponentModel.ISupportInitialize)recordsGridView).BeginInit();
             SuspendLayout();
@@ -72,16 +71,6 @@
             poolComboBox.Size = new Size(151, 27);
             poolComboBox.TabIndex = 3;
             // 
-            // exportButton
-            // 
-            exportButton.Location = new Point(694, 14);
-            exportButton.Name = "exportButton";
-            exportButton.Size = new Size(94, 29);
-            exportButton.TabIndex = 4;
-            exportButton.Text = "匯出檔案";
-            exportButton.UseVisualStyleBackColor = true;
-            exportButton.Click += exportButton_Click;
-            // 
             // fiveStarStatsLabel
             // 
             fiveStarStatsLabel.AutoEllipsis = true;
@@ -96,7 +85,6 @@
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(1039, 581);
             Controls.Add(fiveStarStatsLabel);
-            Controls.Add(exportButton);
             Controls.Add(poolComboBox);
             Controls.Add(recordsGridView);
             Controls.Add(historyUrlTextBox);
@@ -115,7 +103,6 @@
         private TextBox historyUrlTextBox;
         private DataGridView recordsGridView;
         private ComboBox poolComboBox;
-        private Button exportButton;
         private Label fiveStarStatsLabel;
     }
 }
