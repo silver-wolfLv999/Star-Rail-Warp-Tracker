@@ -240,9 +240,9 @@ namespace 期中報告
         };
 
         private static async Task<List<WarpRecord>> GetAllHistoryAsync(
-    string pastedUrl,
-    int gachaType,
-    HashSet<string> knownIds)
+            string pastedUrl,
+            int gachaType,
+            HashSet<string> knownIds)
         {
             if (!Uri.TryCreate(pastedUrl.Trim(), UriKind.Absolute, out var uri) ||
                 uri.Scheme != Uri.UriSchemeHttps ||
